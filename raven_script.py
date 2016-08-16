@@ -120,6 +120,7 @@ def main():
     # only bother if this isn't a blank line
     if len(rawline) > 0:
       # start tag
+      log.debug(rawline)
       if reStartTag.match(rawline):
         rawxml = rawline
         log.debug("Start XML Tag found: " + rawline)
