@@ -1,20 +1,17 @@
 #!/usr/bin/env python
-
+import os
 import sys
 import serial
 import time
 import xml.etree.ElementTree as ET
 import re
-import mosquitto
+import paho.mqtt.client as mqtt
 import logging as log
 
 ####################
 
-# serDevice = "/dev/serial/by-id/usb-Rainforest_RFA-Z106-RA-PC_RAVEn_v2.3.21-if00-port0"
 serDevice = "/dev/ttyUSB0"
-
-# mozIP = "10.54.0.20"
-mozIP = "127.0.0.1"
+mozIP = os.environ.get('MQTT_IP')
 
 ####################
 
@@ -72,6 +69,18 @@ def formatRAVEnDigits(xmltree, value):
       sResult = sResult[1:]
   return sResult
 
+def on_connect(client, userdata, flags, rc):
+    print("Connected with result code "+str(rc))
+
+    # Subscribing in on_connect() means that if we lose the connection and
+    # reconnect then subscriptions will be renewed.
+    client.subscribe("$SYS/#")
+
+# The callback for when a PUBLISH message is received from the server.
+def on_message(client, userdata, msg):
+    print(msg.topic+" "+str(msg.payload))
+
+
 # Callback for MQTT Client
 #TODO: This isn't working??
 def onMosquittoConnect(rc):
@@ -83,28 +92,24 @@ def main():
   # open serial port
   ser = serial.Serial(serDevice, 115200, serial.EIGHTBITS, serial.PARITY_NONE, timeout=0.5)
   try:
-    ser.open()
+    ser.isOpen()
     ser.flushInput()
     ser.flushOutput()
     print("connected to: " + ser.portstr)
   except Exception as e:
     print "cannot open serial port: " + str(e)
     exit()
-  
+
   # send initialize command to RAVEn (pg.9 of XML API Doc)
   #TODO: For some reason this command causes the error "Unknown command"?
   #sendCommand(ser, "initialise" )
 
-  # setup mosquitto connection
-  moz = mosquitto.Mosquitto("raven-usb-dongle", True)
-  moz.on_connect = onMosquittoConnect
-  moz.connect(mozIP)
+  client = mqtt.Client()
+  client.on_connect = on_connect
+  client.on_message = on_message
 
-  # Other commands to play with in the future!
-  #sendCommand(ser, "get_meter_info")
-  #sendCommand(ser, "get_connection_status")
-
-  rawxml = ""
+  client.connect(mozIP, 1883, 60)
+  rawxml=""
 
   while True:
     # wait for /n terminated line on serial port (up to timeout)
@@ -126,10 +131,10 @@ def main():
           xmltree = ET.fromstring(rawxml)
           #TODO: Eventually move this branching tree into a function or lookup table
           if xmltree.tag == 'CurrentSummationDelivered':
-            moz.publish("home/energy/summation", getCurrentSummationKWh(xmltree), 1)
+            client.publish("home/energy/summation", getCurrentSummationKWh(xmltree), 1)
             print getCurrentSummationKWh(xmltree)
           elif xmltree.tag == 'InstantaneousDemand':
-            moz.publish("home/energy/demand", getInstantDemandKWh(xmltree), 1)
+            client.publish("home/energy/demand", getInstantDemandKWh(xmltree), 1)
             print getInstantDemandKWh(xmltree)
           else:
             log.warning("*** Unrecognised (not implemented) XML Fragment")
